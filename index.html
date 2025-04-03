@@ -1,1 +1,546 @@
-TODO
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Set Partition Visualizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        /* Custom styles */
+        body {
+            font-family: 'Inter', sans-serif; /* Tailwind default */
+            overscroll-behavior: none; /* Prevent pull-to-refresh */
+        }
+        /* Style for SVG elements */
+        .dot { fill: black; }
+        .line-2 { stroke: red; stroke-width: 5px; } /* Adjusted stroke width for visibility */
+        .poly-3 { fill: green; opacity: 0.6; }
+        .poly-4 { fill: blue; opacity: 0.6; }
+        .poly-5 { fill: yellow; opacity: 0.6; }
+        .poly-6 { fill: purple; opacity: 0.6; }
+
+        /* Grid thumbnail styling */
+        .thumbnail-svg {
+            border: 1px solid #ccc;
+            cursor: pointer;
+            transition: border-color 0.2s ease-in-out, transform 0.2s ease-in-out;
+            background-color: #f9f9f9;
+        }
+        .thumbnail-svg:hover {
+            border-color: #3b82f6; /* blue-500 */
+            transform: scale(1.05);
+        }
+        .thumbnail-svg.active {
+            border-color: #ef4444; /* red-500 */
+            border-width: 2px;
+        }
+        /* Ensure buttons look good */
+        button {
+            transition: background-color 0.2s ease-in-out, transform 0.1s ease-in-out;
+        }
+        button:active {
+            transform: scale(0.95);
+        }
+        /* Responsive grid */
+        #thumbnailGrid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); /* Responsive columns */
+            gap: 0.5rem; /* Tailwind gap-2 */
+        }
+        /* Center main SVG */
+        #mainVisualizationContainer {
+             display: flex;
+             justify-content: center;
+             align-items: center;
+             min-height: 400px; /* Ensure space for SVG */
+        }
+         #mainVisualization {
+            max-width: 100%;
+            height: auto;
+         }
+        /* Style for crossing indicator */
+        .crossing-indicator {
+            color: #dc2626; /* red-600 */
+            font-weight: 500;
+            margin-left: 0.5rem; /* Tailwind ml-2 */
+        }
+
+    </style>
+     <link rel="preconnect" href="https://fonts.googleapis.com">
+     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+</head>
+<body class="bg-gray-100 p-4 md:p-8">
+
+    <div class="container mx-auto max-w-7xl bg-white p-6 rounded-lg shadow-lg">
+
+        <h1 class="text-2xl md:text-3xl font-bold text-center mb-6 text-gray-800">Set Partition Visualizer</h1>
+
+        <div class="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
+            <div class="flex items-center gap-2">
+                <label for="nSelector" class="text-lg font-medium text-gray-700">Select n:</label>
+                <select id="nSelector" class="p-2 border rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500">
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4">4</option>
+                    <option value="5">5</option>
+                    <option value="6">6</option>
+                </select>
+                <span id="nWarning" class="text-sm text-red-600 ml-2 hidden"></span>
+            </div>
+
+            <div class="flex flex-wrap justify-center gap-2">
+                 <button id="firstBtn" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-md shadow">First</button>
+                 <button id="prevBtn" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-md shadow">Previous</button>
+                 <button id="randomBtn" class="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-md shadow">Random</button>
+                 <button id="nextBtn" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-md shadow">Next</button>
+                 <button id="lastBtn" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-md shadow">Last</button>
+            </div>
+        </div>
+
+        <div class="text-center mb-4 text-gray-600">
+            <span id="partitionIndex" class="font-mono text-lg"></span> |
+            <span id="partitionNotation" class="font-mono text-lg"></span>
+            <span id="crossingIndicator" class="crossing-indicator font-mono text-lg"></span>
+        </div>
+
+        <div id="mainVisualizationContainer" class="mb-8 border rounded-md bg-gray-50 p-4">
+            <svg id="mainVisualization" width="400" height="400" viewBox="-220 -220 440 440"></svg>
+        </div>
+
+        <div class="flex justify-between items-baseline mb-4">
+             <h2 class="text-xl font-semibold text-gray-700">All Partitions for n=<span id="gridNValue"></span></h2>
+             <span id="crossingCount" class="text-sm text-gray-500"></span>
+        </div>
+        <div id="thumbnailGrid" class="p-4 border rounded-md bg-gray-50 max-h-96 overflow-y-auto">
+            </div>
+
+    </div>
+
+    <script>
+        // --- Global Variables ---
+        let currentN = 3; // Default value
+        let allPartitions = [];
+        let currentPartitionIndex = 0;
+        let totalCrossingCount = 0; // Added variable for crossing count
+        const mainSvg = d3.select("#mainVisualization");
+        const mainWidth = 400; // viewBox units
+        const mainHeight = 400; // viewBox units
+        const mainRadius = 180; // Radius for main visualization dots
+        const dotRadius = 6;
+        const thumbSize = 100; // Thumbnail SVG size in pixels
+        const thumbViewBoxSize = 120; // ViewBox size for thumbnails
+        const thumbRadius = 50; // Radius for thumbnail dots
+        const thumbDotRadius = 3;
+        const thumbStrokeWidth = 2;
+
+        // --- DOM Elements ---
+        const nSelector = document.getElementById('nSelector');
+        const nWarning = document.getElementById('nWarning');
+        const firstBtn = document.getElementById('firstBtn');
+        const prevBtn = document.getElementById('prevBtn');
+        const randomBtn = document.getElementById('randomBtn');
+        const nextBtn = document.getElementById('nextBtn');
+        const lastBtn = document.getElementById('lastBtn');
+        const partitionIndexDisplay = document.getElementById('partitionIndex');
+        const partitionNotationDisplay = document.getElementById('partitionNotation');
+        const crossingIndicatorDisplay = document.getElementById('crossingIndicator'); // Added element reference
+        const thumbnailGrid = document.getElementById('thumbnailGrid');
+        const gridNValue = document.getElementById('gridNValue');
+        const crossingCountDisplay = document.getElementById('crossingCount'); // Added element reference
+
+        // --- Core Logic ---
+
+        /**
+         * Generates all set partitions of {1, ..., n} using Restricted Growth Strings (RGS).
+         */
+        function generatePartitions(n) {
+            if (n === 0) return [[]];
+            if (n === 1) return [[ [1] ]];
+
+            const partitions = [];
+            const rgs = new Array(n).fill(0);
+            rgs[0] = 1; // a_1 = 1
+
+            function generate(k, maxVal) {
+                if (k === n) {
+                    // Convert RGS to partition
+                    const partitionMap = new Map();
+                    for (let i = 0; i < n; i++) {
+                        const blockId = rgs[i];
+                        if (!partitionMap.has(blockId)) {
+                            partitionMap.set(blockId, []);
+                        }
+                        partitionMap.get(blockId).push(i + 1); // Elements are 1-based
+                    }
+                    partitions.push(Array.from(partitionMap.values()));
+                    return;
+                }
+
+                for (let i = 1; i <= maxVal + 1; i++) {
+                    rgs[k] = i;
+                    generate(k + 1, Math.max(maxVal, i));
+                }
+            }
+
+            generate(1, 1); // Start generating from the second element (index 1)
+            return partitions;
+        }
+
+        /**
+         * Sorts partitions: 1. By number of blocks (ascending), 2. By size of largest block (descending).
+         */
+        function sortPartitions(partitions) {
+            partitions.sort((a, b) => {
+                if (a.length !== b.length) {
+                    return a.length - b.length;
+                }
+                const maxA = Math.max(...a.map(block => block.length));
+                const maxB = Math.max(...b.map(block => block.length));
+                return maxB - maxA; // Descending
+            });
+        }
+
+        /**
+         * Checks if a set partition is crossing.
+         * A partition is crossing if there exist a < b < c < d such that
+         * a, c are in the same block and b, d are in the same block,
+         * and these two blocks are different.
+         * @param {Array<Array<number>>} partition - The partition (array of blocks).
+         * @param {number} n - The size of the set {1, ..., n}.
+         * @returns {boolean} - True if the partition is crossing, false otherwise.
+         */
+        function isCrossing(partition, n) {
+            if (n < 4) return false; // Crossing requires at least 4 elements
+
+            // Create a map for quick lookup of element -> block index
+            const elementToBlockMap = new Map();
+            partition.forEach((block, index) => { // Use index as a simple block identifier
+                block.forEach(el => elementToBlockMap.set(el, index));
+            });
+
+            // Iterate through all possible combinations of a < b < c < d
+            for (let a = 1; a <= n; a++) {
+                for (let b = a + 1; b <= n; b++) {
+                    for (let c = b + 1; c <= n; c++) {
+                        for (let d = c + 1; d <= n; d++) {
+                            const blockIndexA = elementToBlockMap.get(a);
+                            const blockIndexB = elementToBlockMap.get(b);
+                            const blockIndexC = elementToBlockMap.get(c);
+                            const blockIndexD = elementToBlockMap.get(d);
+
+                            // Check the crossing condition:
+                            if (blockIndexA === blockIndexC && blockIndexB === blockIndexD && blockIndexA !== blockIndexB) {
+                                return true; // Found a crossing
+                            }
+                        }
+                    }
+                }
+            }
+
+            return false; // No crossing found
+        }
+
+
+        /**
+         * Calculates the positions of n dots equally spaced on a circle.
+         */
+        function calculateDotPositions(n, radius) {
+            const positions = [];
+            const angleStep = (2 * Math.PI) / n;
+            for (let i = 0; i < n; i++) {
+                // Start from top (angle = -PI/2)
+                const angle = -Math.PI / 2 + i * angleStep;
+                positions.push({
+                    x: radius * Math.cos(angle),
+                    y: radius * Math.sin(angle)
+                });
+            }
+            return positions;
+        }
+
+        /**
+         * Draws a single partition onto an SVG element.
+         */
+        function drawPartition(svg, partition, n, radius, r, strokeWidth) {
+            svg.selectAll("*").remove(); // Clear previous drawing
+
+            const dotPositions = calculateDotPositions(n, radius);
+
+            // --- Draw connections/shapes first (under dots) ---
+            partition.forEach(block => {
+                if (block.length < 2) return; // Skip singletons
+
+                const blockPoints = block.map(element => dotPositions[element - 1]); // 0-indexed positions
+                // Sort points angularly for consistent polygon drawing
+                blockPoints.sort((a, b) => Math.atan2(a.y, a.x) - Math.atan2(b.y, b.x));
+
+                if (block.length === 2) {
+                    svg.append("line")
+                        .attr("x1", blockPoints[0].x)
+                        .attr("y1", blockPoints[0].y)
+                        .attr("x2", blockPoints[1].x)
+                        .attr("y2", blockPoints[1].y)
+                        .attr("class", "line-2")
+                        .style("stroke-width", strokeWidth); // Use parameter
+                } else if (block.length >= 3) {
+                    const polygonPoints = blockPoints.map(p => `${p.x},${p.y}`).join(" ");
+                    svg.append("polygon")
+                        .attr("points", polygonPoints)
+                        .attr("class", `poly-${block.length}`);
+                }
+            });
+
+            // --- Draw dots on top ---
+            svg.selectAll(".dot")
+                .data(dotPositions)
+                .enter()
+                .append("circle")
+                .attr("class", "dot")
+                .attr("cx", d => d.x)
+                .attr("cy", d => d.y)
+                .attr("r", r); // Use parameter
+        }
+
+        /**
+         * Formats a partition into mathematical notation string.
+         */
+        function formatPartitionNotation(partition) {
+            // Sort blocks internally for consistent notation
+            const sortedPartition = partition.map(block => [...block].sort((a, b) => a - b));
+            // Sort blocks themselves based on the minimum element in each block
+            sortedPartition.sort((a, b) => Math.min(...a) - Math.min(...b));
+            return `{${sortedPartition.map(block => `{${block.join(',')}}`).join(',')}}`;
+        }
+
+        /**
+         * Updates the main visualization and info display.
+         * @param {number} index - The index of the partition to display.
+         */
+        function updateDisplay(index) {
+            if (!allPartitions || allPartitions.length === 0) return;
+            index = Math.max(0, Math.min(index, allPartitions.length - 1)); // Clamp index
+            currentPartitionIndex = index;
+
+            const currentPartition = allPartitions[currentPartitionIndex];
+
+            // Update main visualization
+            drawPartition(mainSvg, currentPartition, currentN, mainRadius, dotRadius, 5); // Main viz uses thicker stroke
+
+            // Update info display
+            partitionIndexDisplay.textContent = `${currentPartitionIndex + 1}/${allPartitions.length}`;
+            partitionNotationDisplay.textContent = formatPartitionNotation(currentPartition);
+
+            // Update crossing indicator display
+            if (isCrossing(currentPartition, currentN)) {
+                crossingIndicatorDisplay.textContent = "(Crossing)";
+            } else {
+                crossingIndicatorDisplay.textContent = ""; // Clear if not crossing
+            }
+
+            // Update URL hash
+            updateURLHash();
+
+            // Update active thumbnail
+            highlightActiveThumbnail();
+        }
+
+        /**
+         * Updates the URL hash based on current N and partition index.
+         */
+        function updateURLHash() {
+            window.location.hash = `n=${currentN}&p=${currentPartitionIndex + 1}`;
+        }
+
+        /**
+         * Reads N and partition index from URL hash on load.
+         */
+        function readURLHash() {
+            const hash = window.location.hash.substring(1);
+            const params = new URLSearchParams(hash);
+            const nFromHash = parseInt(params.get('n'), 10);
+            const pFromHash = parseInt(params.get('p'), 10);
+
+            let initialN = currentN; // Default
+            let initialPIndex = 0; // Default
+
+            if (!isNaN(nFromHash) && nFromHash >= 2 && nFromHash <= 6) {
+                initialN = nFromHash;
+            }
+            // Validate pFromHash after partitions for initialN are loaded
+            return { initialN, initialPIndex: isNaN(pFromHash) ? 0 : pFromHash - 1 };
+        }
+
+
+        /**
+         * Generates the grid of thumbnail SVGs.
+         */
+        function generateThumbnailGrid() {
+            thumbnailGrid.innerHTML = ''; // Clear existing grid
+            gridNValue.textContent = currentN; // Update grid title
+
+            // Update total crossing count display
+            crossingCountDisplay.textContent = `(${totalCrossingCount} crossing / ${allPartitions.length} total)`;
+
+
+            if (currentN === 6) {
+                 nWarning.textContent = `B(6) = 203 partitions—grid rendering might take a moment.`;
+                 nWarning.classList.remove('hidden');
+            } else {
+                 nWarning.classList.add('hidden');
+            }
+
+
+            allPartitions.forEach((partition, index) => {
+                const thumbSvgContainer = document.createElement('div'); // Use a container for easier styling if needed
+                thumbSvgContainer.classList.add('thumbnail-svg-container', 'aspect-square'); // Maintain aspect ratio
+
+                const thumbSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+                thumbSvg.setAttribute('width', '100%'); // Make SVG responsive within container
+                thumbSvg.setAttribute('height', '100%');
+                thumbSvg.setAttribute('viewBox', `-${thumbViewBoxSize/2} -${thumbViewBoxSize/2} ${thumbViewBoxSize} ${thumbViewBoxSize}`);
+                thumbSvg.classList.add('thumbnail-svg');
+                thumbSvg.dataset.index = index; // Store index for click handler
+
+                const d3ThumbSvg = d3.select(thumbSvg);
+                drawPartition(d3ThumbSvg, partition, currentN, thumbRadius, thumbDotRadius, thumbStrokeWidth); // Use thumbnail dimensions
+
+                thumbSvg.addEventListener('click', () => {
+                    updateDisplay(index);
+                });
+
+                thumbSvgContainer.appendChild(thumbSvg);
+                thumbnailGrid.appendChild(thumbSvgContainer);
+            });
+
+             // Highlight the initially active thumbnail
+             highlightActiveThumbnail();
+        }
+
+        /**
+         * Highlights the active thumbnail in the grid.
+         */
+        function highlightActiveThumbnail() {
+            // Remove active class from all thumbnails
+            thumbnailGrid.querySelectorAll('.thumbnail-svg').forEach(svg => {
+                svg.classList.remove('active');
+            });
+            // Add active class to the current one
+            const activeThumb = thumbnailGrid.querySelector(`.thumbnail-svg[data-index="${currentPartitionIndex}"]`);
+            if (activeThumb) {
+                activeThumb.classList.add('active');
+                 // Scroll the active thumbnail into view if needed
+                 activeThumb.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        }
+
+
+        /**
+         * Handles the change in the N selector.
+         * Regenerates partitions, calculates crossing count, updates display and grid.
+         */
+        function handleNChange() {
+            currentN = parseInt(nSelector.value, 10);
+            console.log(`N changed to: ${currentN}`);
+
+            // Regenerate and sort partitions
+            allPartitions = generatePartitions(currentN);
+            sortPartitions(allPartitions);
+            console.log(`Generated ${allPartitions.length} partitions for n=${currentN}`);
+
+            // Calculate total crossing count for the new N
+            totalCrossingCount = 0;
+            allPartitions.forEach(partition => {
+                if (isCrossing(partition, currentN)) {
+                    totalCrossingCount++;
+                }
+            });
+            console.log(`Found ${totalCrossingCount} crossing partitions for n=${currentN}`);
+
+
+            // Reset index and update display (which now includes crossing indicator)
+            currentPartitionIndex = 0;
+            updateDisplay(currentPartitionIndex); // Update display first
+
+            // Regenerate thumbnails and update count display
+            generateThumbnailGrid(); // This now uses the calculated totalCrossingCount
+        }
+
+
+        // --- Initialization ---
+        function initialize() {
+            const { initialN, initialPIndex } = readURLHash();
+
+            // Set selector value without triggering change event yet
+            nSelector.value = initialN;
+            currentN = initialN; // Set global currentN
+
+            // Generate partitions for the initial N
+            allPartitions = generatePartitions(currentN);
+            sortPartitions(allPartitions);
+
+            // Calculate initial crossing count
+            totalCrossingCount = 0;
+            allPartitions.forEach(partition => {
+                if (isCrossing(partition, currentN)) {
+                    totalCrossingCount++;
+                }
+            });
+
+            // Validate initialPIndex against the loaded partitions
+            let validatedPIndex = 0;
+            if (initialPIndex >= 0 && initialPIndex < allPartitions.length) {
+                validatedPIndex = initialPIndex;
+            }
+
+            // Initial display update (will show crossing status for initial partition)
+            updateDisplay(validatedPIndex);
+
+            // Generate initial thumbnails and display total count
+            generateThumbnailGrid();
+
+
+            // --- Event Listeners ---
+            nSelector.addEventListener('change', handleNChange);
+
+            firstBtn.addEventListener('click', () => updateDisplay(0));
+            prevBtn.addEventListener('click', () => updateDisplay(currentPartitionIndex - 1));
+            nextBtn.addEventListener('click', () => updateDisplay(currentPartitionIndex + 1));
+            lastBtn.addEventListener('click', () => updateDisplay(allPartitions.length - 1));
+            randomBtn.addEventListener('click', () => {
+                const randomIndex = Math.floor(Math.random() * allPartitions.length);
+                updateDisplay(randomIndex);
+            });
+
+             // Update display if hash changes (e.g., browser back/forward)
+             window.addEventListener('hashchange', () => {
+                const { initialN, initialPIndex } = readURLHash();
+                if (initialN !== currentN) {
+                    // If N changed via hash, update selector and reload
+                    nSelector.value = initialN;
+                    // handleNChange recalculates counts and regenerates everything
+                    handleNChange();
+                     let validatedPIndexOnHashChange = 0;
+                     if (initialPIndex >= 0 && initialPIndex < allPartitions.length) {
+                         validatedPIndexOnHashChange = initialPIndex;
+                     }
+                     // Need to call updateDisplay again *after* handleNChange finishes
+                     // to ensure the correct partition index from the hash is shown
+                     // for the *new* n value. handleNChange resets it to 0 initially.
+                     updateDisplay(validatedPIndexOnHashChange);
+
+                } else if (initialPIndex !== currentPartitionIndex && initialPIndex >= 0 && initialPIndex < allPartitions.length) {
+                    // If only partition index changed, just update display
+                    updateDisplay(initialPIndex);
+                }
+            });
+        }
+
+        // Run initialization when the DOM is ready
+        document.addEventListener('DOMContentLoaded', initialize);
+
+    </script>
+
+</body>
+</html>
